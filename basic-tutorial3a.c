@@ -82,9 +82,9 @@ main (int   argc,
 
   /* Create gstreamer elements */
   pipeline = gst_pipeline_new ("audio-player");
-  source   = gst_element_factory_make ("filesrc",       "file-source");
+  source   = gst_element_factory_make ("filesrc",       "file-src");
   demuxer  = gst_element_factory_make ("oggdemux",      "ogg-demuxer");
-  decoder  = gst_element_factory_make ("mad",     "vmad");
+  decoder  = gst_element_factory_make ("mad",     "avdec_mp3");
   conv     = gst_element_factory_make ("audioconvert",  "converter");
   sink     = gst_element_factory_make ("autoaudiosink", "audio-output");
 
@@ -110,9 +110,9 @@ main (int   argc,
 
   /* we link the elements together */
   /* file-source -> ogg-demuxer ~> vorbis-decoder -> converter -> alsa-output */
-  gst_element_link (source, decoder);
-  gst_element_link(conv, sink);
-  g_signal_connect (decoder, "pad-added", G_CALLBACK (on_pad_added), conv);
+  gst_element_link_many (source, decoder,conv,sink,NULL);
+  //gst_element_link(conv, sink);
+ // g_signal_connect (decoder, "pad-added", G_CALLBACK (on_pad_added), conv);
 
   /* note that the demuxer will be linked to the decoder dynamically.
      The reason is that Ogg may contain various streams (for example
