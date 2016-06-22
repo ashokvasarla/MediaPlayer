@@ -7,18 +7,25 @@ typedef struct _CustomData {
   GstElement *convert;
   GstElement *decoder;
   GstElement *sink;
+  gboolean playing;
+  gint64 duration;
+  gboolean terminate;
 } CustomData;
+
+
    
 /* Handler for the pad-added signal */
-static void pad_added_handler (GstElement *src, GstPad *pad, CustomData *data);
+static void handle_message(GstMessage *msg, CustomData *data);
    
 int main(int argc, char *argv[]) {
   CustomData data;
   GstBus *bus;
   GstMessage *msg;
   GstStateChangeReturn ret;
-  gboolean terminate = FALSE;
+  data.terminate = FALSE;
   GstElement *filesrc;
+  data.playing = FALSE;
+  data.duration = GST_CLOCK_TIME_NONE;
    
   /* Initialize GStreamer */
   gst_init (&argc, &argv);
@@ -79,11 +86,50 @@ int main(int argc, char *argv[]) {
   /* Listen to the bus */
   bus = gst_element_get_bus (data.pipeline);
   do {
-    msg = gst_bus_timed_pop_filtered (bus, GST_CLOCK_TIME_NONE,
-        GST_MESSAGE_STATE_CHANGED | GST_MESSAGE_ERROR | GST_MESSAGE_EOS);
+    msg = gst_bus_timed_pop_filtered (bus, 100 * GST_MSECOND,
+        GST_MESSAGE_STATE_CHANGED | GST_MESSAGE_ERROR | GST_MESSAGE_EOS | GST_MESSAGE_DURATION);
+   if ( msg != NULL)
+   {
+	   handle_message(msg,&data);
+   }
+   else
+   {
+	   if(data.playing)
+	   {
+		   GstFormat fmt = GST_FORMAT_TIME;
+		   gint64 current = -1;
+		   
+		   if(!gst_element_query_position(data.pipeline,fmt,&current))
+		   {
+			   g_printerr("Could not query current position.\n");
+		   }
+		   
+		   if( !GST_CLOCK_TIME_IS_VALID (data.duration)) {
+			   if (!gst_element_query_duration (data.pipeline, fmt, &data.duration)) {
+            g_printerr ("Could not query current duration.\n");
+			}
+			}
+			/* Print current position and total duration */
+			g_print ("Position %" GST_TIME_FORMAT " / %" GST_TIME_FORMAT "\r",
+            GST_TIME_ARGS (current), GST_TIME_ARGS (data.duration));
+		   
+		}
+		printf("Timeout \n");
+   }
+
+  } while (!data.terminate);
    
-    /* Parse message */
-    if (msg != NULL) {
+  /* Free resources */
+  gst_object_unref (bus);
+  gst_element_set_state (data.pipeline, GST_STATE_NULL);
+  gst_object_unref (data.pipeline);
+  return 0;
+}
+
+void handle_message(GstMessage *msg ,CustomData *data)
+{
+	    /* Parse message */
+    
       GError *err;
       gchar *debug_info;
        
@@ -94,19 +140,21 @@ int main(int argc, char *argv[]) {
           g_printerr ("Debugging information: %s\n", debug_info ? debug_info : "none");
           g_clear_error (&err);
           g_free (debug_info);
-          terminate = TRUE;
+          data->terminate = TRUE;
           break;
         case GST_MESSAGE_EOS:
           g_print ("End-Of-Stream reached.\n");
-          terminate = TRUE;
+          data->terminate = TRUE;
           break;
         case GST_MESSAGE_STATE_CHANGED:
           /* We are only interested in state-changed messages from the pipeline */
-          if (GST_MESSAGE_SRC (msg) == GST_OBJECT (data.pipeline)) {
+          if (GST_MESSAGE_SRC (msg) == GST_OBJECT (data->pipeline)) {
             GstState old_state, new_state, pending_state;
             gst_message_parse_state_changed (msg, &old_state, &new_state, &pending_state);
             g_print ("Pipeline state changed from %s to %s:\n",
-                gst_element_state_get_name (old_state), gst_element_state_get_name (new_state));
+            gst_element_state_get_name (old_state), gst_element_state_get_name (new_state));
+            /* Remember whether we are in the PLAYING state or not */
+			data->playing = (new_state == GST_STATE_PLAYING);
           }
           break;
         default:
@@ -115,56 +163,6 @@ int main(int argc, char *argv[]) {
           break;
       }
       gst_message_unref (msg);
-    }
-  } while (!terminate);
-   
-  /* Free resources */
-  gst_object_unref (bus);
-  gst_element_set_state (data.pipeline, GST_STATE_NULL);
-  gst_object_unref (data.pipeline);
-  return 0;
+    
 }
-void pad_added_handler (GstElement *src, GstPad *new_pad, CustomData *data)
-{
-	GstCaps *new_pad_caps = NULL;
-	GstStructure *new_pad_struct = NULL;
-	const gchar *new_pad_type = NULL;
-	GstPadLinkReturn ret;
-	GstPad *sink_pad = gst_element_get_static_pad( data->convert , "sink");
-	
-	g_print ("Received new pad '%s' from '%s':\n", GST_PAD_NAME (new_pad), GST_ELEMENT_NAME (src));
-	
-	 /* If our converter is already linked, we have nothing to do here */
-	if (gst_pad_is_linked (sink_pad)) {
-    g_print ("  We are already linked. Ignoring.\n");
-    goto exit;
-	}
-	/*
-	new_pad_caps = gst_pad_get_caps(new_pad);
-	new_pad_struct = gst_caps_get_structure( new_pad_caps,0);
-	new_pad_type = gst_structure_get_name(new_pad_struct);
-	
-	if( !g_str_has_prefix(new_pad_type ,"audio/x-raw"))
-	{
-		g_print ("  It has type '%s' which is not raw audio. Ignoring.\n", new_pad_type);
-		goto exit;
-	}
-	 */
-	/* Attempt the link */
-  ret = gst_pad_link (new_pad, sink_pad);
-  if (GST_PAD_LINK_FAILED (ret)) {
-    g_print ("  Type is '%s' but link failed.\n", new_pad_type);
-  } else {
-    g_print ("  Link succeeded (type '%s').\n", new_pad_type);
-  }
-exit:
-  /* Unreference the new pad's caps, if we got them */
-  if (new_pad_caps != NULL)
-    gst_caps_unref (new_pad_caps);
-   
-  /* Unreference the sink pad */
-  gst_object_unref (sink_pad);
-	
-	
-	
-}
+

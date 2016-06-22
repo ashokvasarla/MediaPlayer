@@ -29,6 +29,12 @@ bus_call (GstBus     *bus,
       g_main_loop_quit (loop);
       break;
     }
+    case GST_MESSAGE_DURATION:
+		g_print ("GST_MESSAGE_DURATION \n");
+    break;
+    case GST_MESSAGE_STATE_CHANGED:
+		g_print ("GST_MESSAGE_STATE_CHANGED \n");
+    break;
     default:
       break;
   }
@@ -36,6 +42,10 @@ bus_call (GstBus     *bus,
   return TRUE;
 }
 
+static void state_changed_cb(GstBus *bus, GstMessage *msg,GstElement *pipeline)
+{
+	g_print ("state_changed_cb \n");
+}
 
 static void
 on_pad_added (GstElement *element,
@@ -100,7 +110,9 @@ main (int   argc,
 
   /* we add a message handler */
   bus = gst_pipeline_get_bus (GST_PIPELINE (pipeline));
-  bus_watch_id = gst_bus_add_watch (bus, bus_call, loop);
+  //bus_watch_id = gst_bus_add_watch (bus, bus_call, loop);
+  gst_bus_add_signal_watch (bus);
+  g_signal_connect (G_OBJECT (bus), "message::state-changed", (GCallback)state_changed_cb,pipeline);
   gst_object_unref (bus);
 
   /* we add all elements into the pipeline */
